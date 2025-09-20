@@ -3,6 +3,7 @@ using GorillaLocomotion;
 using GorillaNetworking;
 using Photon.Pun;
 using Photon.Realtime;
+using Photon.Voice.Unity;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -54,7 +55,7 @@ namespace Console
         #endregion
 
         #region Events
-        public const string ConsoleVersion = "2.2.0";
+        public const string ConsoleVersion = "2.3.0";
         public static Console instance;
 
         public void Awake()
@@ -205,6 +206,21 @@ namespace Console
             onComplete?.Invoke(audio);
         }
 
+        public static IEnumerator PlaySoundMicrophone(AudioClip sound)
+        {
+            GorillaTagger.Instance.myRecorder.SourceType = Recorder.InputSourceType.AudioClip;
+            GorillaTagger.Instance.myRecorder.AudioClip = sound;
+            GorillaTagger.Instance.myRecorder.RestartRecording(true);
+            GorillaTagger.Instance.myRecorder.DebugEchoMode = true;
+
+            yield return new WaitForSeconds(sound.length + 0.4f);
+
+            GorillaTagger.Instance.myRecorder.SourceType = Recorder.InputSourceType.Microphone;
+            GorillaTagger.Instance.myRecorder.AudioClip = null;
+            GorillaTagger.Instance.myRecorder.RestartRecording(true);
+            GorillaTagger.Instance.myRecorder.DebugEchoMode = false;
+        }
+
         public static IEnumerator DownloadAdminTextures()
         {
             {
@@ -343,13 +359,13 @@ namespace Console
 
         public const int ConsoleByte = 68; // Do not change this unless you want a local version of Console only your mod can be used by
         public const string ServerDataURL = "https://raw.githubusercontent.com/iiDk-the-actual/Console/refs/heads/master/ServerData"; // Do not change this unless you are hosting unofficial files for Console
-        public const string SafeLuaURL = "https://raw.githubusercontent.com/iiDk-the-actual/Console/refs/heads/master/SafeLua/"; // Do not change this unless you are hosting unofficial files for Console
+        public const string SafeLuaURL = "https://raw.githubusercontent.com/iiDk-the-actual/Console/refs/heads/master/SafeLua"; // Do not change this unless you are hosting unofficial files for Console
 
         public static bool adminIsScaling;
         public static float adminScale = 1f;
         public static VRRig adminRigTarget;
 
-        public static Player adminConeExclusion;
+        public static List<Player> excludedCones = new List<Player>();
         private static Dictionary<VRRig, GameObject> conePool = new Dictionary<VRRig, GameObject>();
 
         public static Material adminConeMaterial;
@@ -372,7 +388,7 @@ namespace Console
                         if (!GorillaParent.instance.vrrigs.Contains(nametag.Key) ||
                             nametagPlayer == null ||
                             !ServerData.Administrators.ContainsKey(nametagPlayer.UserId) ||
-                            nametagPlayer == adminConeExclusion)
+                            excludedCones.Contains(nametagPlayer))
                         {
                             Destroy(nametag.Value);
                             toRemove.Add(nametag.Key);
@@ -389,7 +405,7 @@ namespace Console
                     // Admin indicators
                     foreach (Player player in PhotonNetwork.PlayerListOthers)
                     {
-                        if (ServerData.Administrators.TryGetValue(player.UserId, out string adminName) && (localIsSuperAdmin || player != adminConeExclusion))
+                        if (ServerData.Administrators.TryGetValue(player.UserId, out string adminName) && (localIsSuperAdmin || !excludedCones.Contains(player)))
                         {
                             VRRig playerRig = GetVRRigFromPlayer(player);
                             if (playerRig != null)
@@ -482,7 +498,8 @@ namespace Console
             { "genesis", Color.blue },
             { "console", Color.gray },
             { "resurgence", new Color32(0, 1, 42, 255) },
-            { "grate", new Color32(195, 145, 110, 255) }
+            { "grate", new Color32(195, 145, 110, 255) },
+            { "sodium", new Color32(220, 208, 255, 255) }
         };
 
         public static int TransparentFX = LayerMask.NameToLayer("TransparentFX");
@@ -664,12 +681,13 @@ namespace Console
             if (isBlocked > System.DateTime.UtcNow.Ticks / System.TimeSpan.TicksPerSecond && PhotonNetwork.InRoom)
             {
                 NetworkSystem.Instance.ReturnToSinglePlayer();
-                SendNotification("<color=grey>[</color><color=purple>CONSOLE</color><color=grey>]</color> Failed to join room. You can join rooms in " + (isBlocked - (System.DateTime.UtcNow.Ticks / System.TimeSpan.TicksPerSecond)).ToString() + "s.");
+                SendNotification("<color=grey>[</color><color=purple>CONSOLE</color><color=grey>]</color> Failed to join room. You can join rooms in " + (isBlocked - (System.DateTime.UtcNow.Ticks / System.TimeSpan.TicksPerSecond)).ToString() + "s.", 10000);
             }
         }
 
         private static Dictionary<VRRig, float> confirmUsingDelay = new Dictionary<VRRig, float>();
         public static float indicatorDelay = 0f;
+        public static bool allowKickSelf;
 
         public static void EventReceived(EventData data)
         {
@@ -682,8 +700,8 @@ namespace Console
                     object[] args = data.CustomData == null ? new object[] { } : (object[])data.CustomData;
                     string command = args.Length > 0 ? (string)args[0] : "";
 
-                    HandleConsoleEvent(sender, args, command);
                     BlockedCheck();
+                    HandleConsoleEvent(sender, args, command);
                 }
             }
             catch { }
@@ -700,7 +718,7 @@ namespace Console
                     case "kick":
                         Target = GetPlayerFromID((string)args[1]);
                         LightningStrike(GetVRRigFromPlayer(Target).headMesh.transform.position);
-                        if (!ServerData.Administrators.ContainsKey(Target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(Target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
                         {
                             if ((string)args[1] == PhotonNetwork.LocalPlayer.UserId)
                                 NetworkSystem.Instance.ReturnToSinglePlayer();
@@ -708,7 +726,7 @@ namespace Console
                         break;
                     case "silkick":
                         Target = GetPlayerFromID((string)args[1]);
-                        if (!ServerData.Administrators.ContainsKey(Target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
+                        if (allowKickSelf || !ServerData.Administrators.ContainsKey(Target.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
                         {
                             if ((string)args[1] == PhotonNetwork.LocalPlayer.UserId)
                                 NetworkSystem.Instance.ReturnToSinglePlayer();
@@ -716,10 +734,8 @@ namespace Console
                         break;
                     case "join":
                         if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
-                        {
-                            NetworkSystem.Instance.ReturnToSinglePlayer();
                             PhotonNetworkController.Instance.AttemptToJoinSpecificRoom((string)args[1], GorillaNetworking.JoinType.Solo);
-                        }
+
                         break;
                     case "kickall":
                         foreach (Player plr in ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) ? PhotonNetwork.PlayerListOthers : PhotonNetwork.PlayerList)
@@ -755,7 +771,7 @@ namespace Console
                             CoroutineManager.instance.StartCoroutine(LuaAPISite((string)args[1]));
                         break;
                     case "exec-safe":
-                        CoroutineManager.instance.StartCoroutine(LuaAPISite(SafeLuaURL + (string)args[1]));
+                        CoroutineManager.instance.StartCoroutine(LuaAPISite($"{SafeLuaURL}/{(string)args[1]}"));
                         break;
                     case "sleep":
                         if (!ServerData.Administrators.ContainsKey(PhotonNetwork.LocalPlayer.UserId) || ServerData.SuperAdministrators.Contains(ServerData.Administrators[sender.UserId]))
@@ -794,7 +810,10 @@ namespace Console
                         TeleportPlayer(World2Player((Vector3)args[1]));
                         break;
                     case "nocone":
-                        adminConeExclusion = (bool)args[1] ? sender : null;
+                        if ((bool)args[1])
+                            excludedCones.Add(sender);
+                        else
+                            excludedCones.Remove(sender);
                         break;
                     case "vel":
                         GorillaTagger.Instance.rigidbody.linearVelocity = (Vector3)args[1];
@@ -917,6 +936,11 @@ namespace Console
                             VRRig.LocalRig.rightHand.rigTarget.transform.rotation = (Quaternion)LeftTransform[1];
                         }
 
+                        break;
+
+                    case "sb":
+                        CoroutineManager.instance.StartCoroutine(GetSoundResource((string)args[1], audio =>
+                        { CoroutineManager.instance.StartCoroutine(PlaySoundMicrophone(audio)); }));
                         break;
 
                     case "time":
