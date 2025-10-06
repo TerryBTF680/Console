@@ -60,7 +60,6 @@ void OnPlayerSpawned()
     if (ConsoleObject == null)
     {
         ConsoleObject = new GameObject(ConsoleGUID);
-        ConsoleObject.AddComponent<CoroutineManager>();
         ConsoleObject.AddComponent<Console>();
     } else
     {
@@ -77,7 +76,6 @@ void OnPlayerSpawned()
             {
                 Destroy(ConsoleObject);
                 ConsoleObject = new GameObject(ConsoleGUID);
-                ConsoleObject.AddComponent<CoroutineManager>();
                 ConsoleObject.AddComponent<Console>();
             }
         }
